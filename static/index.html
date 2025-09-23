@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ToDo リスト</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>📝 ToDo リスト</h1>
+        
+        <div class="add-task">
+            <input type="text" id="taskInput" placeholder="新しいタスクを入力してください..." maxlength="100">
+            <button onclick="addTask()">追加</button>
+        </div>
+        
+        <ul class="task-list" id="taskList">
+            <!-- タスクはJavaScriptで動的に追加されます -->
+        </ul>
+        
+        <div class="empty-state" id="emptyState" style="display: none;">
+            タスクがありません。上記のフォームから新しいタスクを追加してください。
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
