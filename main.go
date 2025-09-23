@@ -10,18 +10,27 @@ import (
 	"sync"
 )
 
+// Task は1件のタスク（やること）を表すデータ構造です
+// ID: 一意に識別する番号
+// Title: タスクの内容
+// Completed: 完了しているかどうか
 type Task struct {
 	ID        int    `json:"id"`
 	Title     string `json:"title"`
 	Completed bool   `json:"completed"`
 }
 
+// TodoApp はアプリ全体の状態を管理します
+// tasks: すべてのタスク一覧
+// nextID: 次に採番するID
+// mutex: 複数のリクエストから同時に触られても安全にするためのロック
 type TodoApp struct {
 	tasks  []Task
 	nextID int
 	mutex  sync.RWMutex
 }
 
+// NewTodoApp は TodoApp の初期化（コンストラクタ）を行います
 func NewTodoApp() *TodoApp {
 	return &TodoApp{
 		tasks:  make([]Task, 0),
@@ -29,10 +38,12 @@ func NewTodoApp() *TodoApp {
 	}
 }
 
+// AddTask は新しいタスクを作成して一覧に追加します
+// 排他ロック（書き込み用）を使って安全に配列へ追加します
 func (app *TodoApp) AddTask(title string) Task {
 	app.mutex.Lock()
 	defer app.mutex.Unlock()
-	
+
 	task := Task{
 		ID:        app.nextID,
 		Title:     title,
@@ -43,19 +54,24 @@ func (app *TodoApp) AddTask(title string) Task {
 	return task
 }
 
+// GetTasks は現在のタスク一覧をコピーして返します
+// 読み取り専用ロックを使い、呼び出し側が書き換えても
+// 元データに影響しないようスライスのコピーを返します
 func (app *TodoApp) GetTasks() []Task {
 	app.mutex.RLock()
 	defer app.mutex.RUnlock()
-	
+
 	tasksCopy := make([]Task, len(app.tasks))
 	copy(tasksCopy, app.tasks)
 	return tasksCopy
 }
 
+// ToggleTask は指定IDのタスクの完了フラグを反転（true/false）します
+// 見つかったら true を、見つからなければ false を返します
 func (app *TodoApp) ToggleTask(id int) bool {
 	app.mutex.Lock()
 	defer app.mutex.Unlock()
-	
+
 	for i := range app.tasks {
 		if app.tasks[i].ID == id {
 			app.tasks[i].Completed = !app.tasks[i].Completed
@@ -65,10 +81,12 @@ func (app *TodoApp) ToggleTask(id int) bool {
 	return false
 }
 
+// DeleteTask は指定IDのタスクを一覧から削除します
+// 見つかったら true を、見つからなければ false を返します
 func (app *TodoApp) DeleteTask(id int) bool {
 	app.mutex.Lock()
 	defer app.mutex.Unlock()
-	
+
 	for i, task := range app.tasks {
 		if task.ID == id {
 			app.tasks = append(app.tasks[:i], app.tasks[i+1:]...)
@@ -78,8 +96,11 @@ func (app *TodoApp) DeleteTask(id int) bool {
 	return false
 }
 
+// アプリ全体で共有する TodoApp のインスタンス
 var todoApp = NewTodoApp()
 
+// 画面（HTML）のテンプレート
+// Go の template パッケージで {{...}} の部分にデータ（タスク一覧）が埋め込まれます
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="ja">
@@ -209,6 +230,7 @@ const htmlTemplate = `
     </div>
 
     <script>
+        // 追加ボタン（またはEnterキー）で呼ばれ、/api/tasks にPOSTしてサーバ側でタスクを作成
         function addTask() {
             const input = document.getElementById('taskInput');
             const title = input.value.trim();
@@ -229,7 +251,7 @@ const htmlTemplate = `
             .then(data => {
                 if (data.success) {
                     input.value = '';
-                    location.reload();
+                    location.reload(); // 画面を更新して最新の一覧を表示
                 } else {
                     alert('タスクの追加に失敗しました');
                 }
@@ -240,6 +262,7 @@ const htmlTemplate = `
             });
         }
         
+        // チェックボックスの変更で呼ばれ、/api/tasks/{id}/toggle にPUTして完了状態を反転
         function toggleTask(id) {
             fetch('/api/tasks/' + id + '/toggle', {
                 method: 'PUT'
@@ -258,6 +281,7 @@ const htmlTemplate = `
             });
         }
         
+        // 削除ボタンで呼ばれ、/api/tasks/{id} にDELETEしてタスクを削除
         function deleteTask(id) {
             if (confirm('このタスクを削除しますか？')) {
                 fetch('/api/tasks/' + id, {
@@ -278,6 +302,7 @@ const htmlTemplate = `
             }
         }
         
+        // Enter キーでも追加できるようにする
         document.getElementById('taskInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 addTask();
@@ -288,40 +313,43 @@ const htmlTemplate = `
 </html>
 `
 
+// ルート"/"にアクセスされたときにHTMLを生成して返します
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.New("index").Parse(htmlTemplate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	tasks := todoApp.GetTasks()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, tasks)
 }
 
+// POST /api/tasks に対応
+// リクエストのJSONからタイトルを受け取り、サーバでタスクを作って返します
 func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	var req struct {
 		Title string `json:"title"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	
+
 	if req.Title == "" {
 		http.Error(w, "Title is required", http.StatusBadRequest)
 		return
 	}
-	
+
 	task := todoApp.AddTask(req.Title)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -329,45 +357,49 @@ func addTaskHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PUT /api/tasks/{id}/toggle に対応
+// URL からIDを取り出し、そのタスクの完了状態を反転します
 func toggleTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	idStr := r.URL.Path[len("/api/tasks/"):]
 	idStr = idStr[:len(idStr)-len("/toggle")]
-	
+
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid task ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	success := todoApp.ToggleTask(id)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{
 		"success": success,
 	})
 }
 
+// DELETE /api/tasks/{id} に対応
+// URL からIDを取り出し、そのタスクを削除します
 func deleteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	idStr := r.URL.Path[len("/api/tasks/"):]
-	
+
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid task ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	success := todoApp.DeleteTask(id)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{
 		"success": success,
@@ -375,19 +407,22 @@ func deleteTaskHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/api/tasks", addTaskHandler)
+	// ここでURLと処理を結びつけます（ルーティング）
+	http.HandleFunc("/", homeHandler)             // 画面表示
+	http.HandleFunc("/api/tasks", addTaskHandler) // タスク追加
 	http.HandleFunc("/api/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		// /api/tasks/{id}/toggle か /api/tasks/{id} (DELETE) を振り分け
 		if r.URL.Path[len(r.URL.Path)-7:] == "/toggle" {
 			toggleTaskHandler(w, r)
 		} else {
 			deleteTaskHandler(w, r)
 		}
 	})
-	
+
 	port := "8080"
 	fmt.Printf("ToDo アプリケーションを開始しています...\n")
 	fmt.Printf("ブラウザで http://localhost:%s にアクセスしてください\n", port)
-	
+
+	// 指定ポートでHTTPサーバを起動（Ctrl+Cで停止）
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
